@@ -2,3 +2,4 @@
 data/
 data/dev-claims-baseline.json
 data/dev-claims.json
+*.pt

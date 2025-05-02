@@ -20,7 +20,7 @@ from torch.cuda.amp import autocast, GradScaler
 
 def load_train_data_supervised(tokenizer, file_path, max_length = 512):
     feature_list = []
-    df = pd.read_csv(file_path, sep=',')      # 读取 CSV，包含三列：sent0、sent1、hard_neg
+    df = pd.read_csv(file_path, sep=',')      # read CSV，包含三列：sent0、sent1、hard_neg
     rows = df.to_dict('records')
     for row in rows:
         sent0    = row['sent0']      # anchor sentence
@@ -46,8 +46,10 @@ def load_train_data_supervised(tokenizer, file_path, max_length = 512):
 def train_sup(model, train_loader, optimizer, device, epochs = 5, train_mode = 'supervise'):
     logger.info("start training")
     model.train()
-    best = 0
     accumulation_steps = 4
+    best_loss = float("inf")
+    save_path = "saved_model"
+    os.makedirs(save_path, exist_ok=True)
 
     for epoch in range(epochs):
         for batch_idx, data in enumerate(tqdm(train_loader)):
@@ -63,17 +65,22 @@ def train_sup(model, train_loader, optimizer, device, epochs = 5, train_mode = '
                 loss = simcse_unsup_loss(out, device)
             else:
                 loss = simcse_sup_loss(out, device)
-        
+            loss = loss / accumulation_steps
             loss.backward()
-            step += 1
-
-            if (step + 1) % accumulation_steps == 0:
-                optimizer.zero_grad()
+            if (step + 1) % accumulation_steps == 0 or (batch_idx + 1 == len(train_loader)):   
                 optimizer.step()
+                optimizer.zero_grad()
             
+            if loss.item() < best_loss:
+                best_loss = loss.item()
+                torch.save(model.state_dict(), os.path.join(save_path, "best_model.pt"))
+                logger.info(f"Best model saved at step {step} with loss {best_loss:.4f}")
+
             if step % 100 == 0:
                 logger.info(f"epoch: {epoch}, step: {step}, loss: {loss.item()}")
 
+    logger.info(f"Training completed. Best loss: {best_loss:.4f}")
+    torch.save(model.state_dict(), os.path.join(save_path, "final_model.pt"))
     return 0
 
 # def AMP_train_sup(model, train_loader, optimizer, device, epochs = 5, train_mode = 'supervise'):
