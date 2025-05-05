@@ -8,6 +8,31 @@ from transformers import BertModel, BertConfig, BertTokenizer
 from transformers import BertTokenizer
 
 
+
+class ClaimEvidenceClassifier(nn.Module):
+    def __init__(self, input_size = 768, hidden_size=256, dropout=0.1):
+        super().__init__()
+        self.classifier = nn.Sequential(
+            nn.Linear(input_size * 3, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, 1)  # 二分类用 num_labels=1, 多分类用=3
+        )
+
+    def forward(self, claim_emb, evidence_emb):
+        """
+        claim_inputs: dict with input_ids, attention_mask, token_type_ids (BERT style)
+        evidence_inputs: same
+        """
+
+        # 拼接向量 [claim, evidence, |claim - evidence|]
+        x = torch.cat([claim_emb, evidence_emb, torch.abs(claim_emb - evidence_emb)], dim=1)
+
+        logits = self.classifier(x)  # [batch, num_labels]
+        return logits.squeeze(-1) if logits.shape[-1] == 1 else logits
+    
+
+
 class SimcseModel(nn.Module):
     """Simcse无监督模型定义"""
 

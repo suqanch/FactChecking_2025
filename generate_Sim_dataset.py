@@ -3,9 +3,9 @@ import csv
 import random
 
 # ====== 设置路径 ======
-train_json_path = "data/train-claims.json"      # 包含claim和关联evidence的结构
+train_json_path = "data/dev-claims.json"      # 包含claim和关联evidence的结构
 evidence_json_path = "data/evidence.json"  # 所有evidence的内容
-output_csv_path = "data/train-embed.csv"     # 输出的csv路径
+output_csv_path = "data/dev-embed.csv"     # 输出的csv路径
 
 # ====== 加载数据 ======
 with open(train_json_path, "r", encoding="utf-8") as f:

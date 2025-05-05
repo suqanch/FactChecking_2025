@@ -2,7 +2,7 @@ from loguru import logger
 
 import numpy as np
 from scipy.stats import spearmanr
-
+import pickle
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
@@ -26,43 +26,18 @@ import pandas as pd
 #  "evidence-1": "Lindberg began his professional career at the age of 16, eventually moving to New York City in 1977.", 
 #  "evidence-2": "``Boston (Ladies of Cambridge)'' by Vampire Weekend",
 
-# def embed_evidence(evidence_json_path, output_json_path, model, tokenizer, device,max_length=256):
+def embed_evidence(evidence_json_path, output_json_path, model, tokenizer, device,max_length=256, batch_size=512):
+    with open(evidence_json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
 
-#     new_evidence_data = {}
-#     with open(evidence_json_path, "r", encoding="utf-8") as f:
-#         evidence_data = json.load(f)
-#         count = 0
-#         for evidence_id, evidence_text in evidence_data.items():
-#             print(f"正在处理 evidence_id: {evidence_id}，当前进度: {count}/{len(evidence_data)}", evidence_text)
-#             count += 1
-#             inputs = tokenizer(
-#                 evidence_text,
-#                 max_length=max_length,
-#                 truncation=True,
-#                 padding='max_length',
-#                 return_tensors='pt'
-#             )
-#             input_ids = inputs['input_ids'].to(device)
-#             attention_mask = inputs['attention_mask'].to(device)
-#             token_type_ids = inputs['token_type_ids'].to(device)
+    # 提取 id 和文本列表
+    ids = []
+    evidence = []
 
-#             with torch.no_grad():
-#                 embeddings = model(input_ids, attention_mask, token_type_ids)
+    for id, text in data.items():
+        ids.append(id)
+        evidence.append(text)
 
-#             new_evidence_data[evidence_id] = {
-#                 "text": evidence_text,
-#                 "embedding": embeddings.squeeze(0).tolist()
-#             }
-
-#     with open(output_json_path, "w", encoding="utf-8") as f_out:
-#         json.dump(new_evidence_data, f_out, ensure_ascii=False, indent=2)
-
-
-
-def embed_evidence(evidence_json_path, output_json_path, model, tokenizer, device,max_length=256, batch_size=64):
-    df = pd.read_csv(evidence_json_path, sep=',')
-    ids = df['id'].tolist()
-    evidence = df['text'].tolist()
     model.eval()
     results = {}
     count = 0
@@ -99,8 +74,69 @@ def embed_evidence(evidence_json_path, output_json_path, model, tokenizer, devic
     with open(output_json_path, "w", encoding="utf-8") as f_out:
         json.dump(results, f_out, ensure_ascii=False, indent=2)
 
+def load_evidence_embeddings_from_pickle(pkl_path, device):
+    with open(pkl_path, "rb") as f:
+        raw = pickle.load(f)
 
+    return {
+        eid: {
+            "text": entry["text"],
+            "embedding": entry["embedding"].to(device)
+        }
+        for eid, entry in raw.items()
+    }
 
+def embed_evidence_pkl(evidence_json_path, output_pkl_path, model, tokenizer, device, max_length=256, batch_size=512):
+    with open(evidence_json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    # 提取 id 和文本列表
+    ids = []
+    evidence = []
+
+    for id, text in data.items():
+        ids.append(id)
+        evidence.append(text)
+
+    model.eval()
+    results = {}
+    count = 0
+
+    for i in range(0, len(evidence), batch_size):
+        batch_evidence = evidence[i:i + batch_size]
+        batch_ids = ids[i:i + batch_size]
+
+        inputs = tokenizer(
+            batch_evidence,
+            max_length=max_length,
+            truncation=True,
+            padding='max_length',
+            return_tensors='pt'
+        )
+
+        input_ids = inputs['input_ids'].to(device)
+        attention_mask = inputs['attention_mask'].to(device)
+        token_type_ids = inputs['token_type_ids'].to(device)
+
+        with torch.no_grad():
+            embeddings = model(input_ids, attention_mask, token_type_ids)
+
+        for j in range(len(batch_evidence)):
+            evidence_id = batch_ids[j]
+            evidence_text = batch_evidence[j]
+            embedding = embeddings[j].cpu()  # 不转 list，保留为 Tensor
+            results[evidence_id] = {
+                "text": evidence_text,
+                "embedding": embedding
+            }
+            print(f"正在处理 evidence_id: {evidence_id}，当前进度: {count}/{len(evidence)}")
+            count += 1
+
+    # 保存为 pickle 文件
+    with open(output_pkl_path, "wb") as f_out:
+        pickle.dump(results, f_out)
+
+    print(f"保存完成：共 {len(results)} 条 evidence 保存至 {output_pkl_path}")
 #dev_file_path json sample:
 # {
 #     "claim-752": {
