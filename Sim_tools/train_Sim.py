@@ -6,8 +6,10 @@ from scipy.stats import spearmanr
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
-
-from model_Sim import SimcseModel, simcse_unsup_loss, simcse_sup_loss
+import pickle
+import json
+from embed_evidence import embed_evidence, embed_evidence_pkl, load_evidence_embeddings_from_pickle
+from model_Sim import SimcseModel, simcse_sup_loss
 from dataset_Sim import TrainDataset, TestDataset
 from transformers import BertModel, BertConfig, BertTokenizer
 import os
@@ -18,15 +20,15 @@ from tqdm import tqdm
 from torch.cuda.amp import autocast, GradScaler
  
 
-def load_train_data_supervised(tokenizer, file_path, max_length = 512):
+def load_train_data_supervised(tokenizer, file_path, max_length = 128):
     feature_list = []
-    df = pd.read_csv(file_path, sep=',')      # read CSV，包含三列：sent0、sent1、hard_neg
+    df = pd.read_csv(file_path, sep=',')      # read CSV：sent0、sent1、hard_neg
     rows = df.to_dict('records')
     for row in rows:
         sent0    = row['sent0']      # anchor sentence
         sent1    = row['sent1']      # positive
         hard_neg = row['hard_neg']   # negative
-        # tokenizer 批量编码三句话：
+        
         feature = tokenizer(
             [sent0, sent1, hard_neg],
             max_length=max_length,
@@ -34,7 +36,7 @@ def load_train_data_supervised(tokenizer, file_path, max_length = 512):
             padding='max_length',
             return_tensors='pt'
         )
-        # feature 是个 dict，包含：
+        # feature is a dict with keys:
         # {
         #   'input_ids':      torch.LongTensor of shape [3, seq_len],
         #   'attention_mask': torch.LongTensor of shape [3, seq_len],
@@ -43,13 +45,46 @@ def load_train_data_supervised(tokenizer, file_path, max_length = 512):
         feature_list.append(feature)
     return feature_list
 
-def train_sup(model, train_loader, optimizer, device, epochs = 5, train_mode = 'supervise'):
+def load_test_data_supervised(tokenizer, file_path, max_length = 128):
+    feature_list = []
+    df = pd.read_csv(file_path, sep=',')      # read CSV: sent0、sent1、hard_neg
+    rows = df.to_dict('records')
+    for row in rows:
+        sent0    = row['sent0']      # anchor sentence
+        sent1    = row['sent1']      # positive
+        hard_neg = row['hard_neg']   # negative
+        
+        feature = tokenizer(
+            [sent0, sent1, hard_neg],
+            max_length=max_length,
+            truncation=True,
+            padding='max_length',
+            return_tensors='pt'
+        )
+        feature_list.append(feature)
+    return feature_list
+
+
+def train_sup(model, train_loader, dev_loader, optimizer, device, tokenizer, epochs = 15, eval_step = 200, 
+              train_mode = 'supervise', dev_claim_path = 'dev-claims.json', 
+              evidence_subset_path = 'evidence_subset_train.json', 
+              output_pkl_path = 'evidence_embeddings.pkl'):
     logger.info("start training")
+
+    train_loss_log = []
+    eval_loss_log  = []
+    accuracy_log   = []
+
     model.train()
-    accumulation_steps = 4
+    accumulation_steps = 2
     best_loss = float("inf")
+    best_accuracy = 0.0
     save_path = "saved_model"
     os.makedirs(save_path, exist_ok=True)
+
+
+    dev_accuracy = eval_accuracy(model, dev_claim_path, evidence_subset_path, output_pkl_path, tokenizer, device)
+    logger.info(f"Step 0 retrieval_accuracy: {dev_accuracy:.4f}")
 
     for epoch in range(epochs):
         for batch_idx, data in enumerate(tqdm(train_loader)):
@@ -61,60 +96,186 @@ def train_sup(model, train_loader, optimizer, device, epochs = 5, train_mode = '
             token_type_ids = data['token_type_ids'].view(-1, sql_len).to(device)
             # logger.info('debug')
             out = model(input_ids, attention_mask, token_type_ids)
-            if train_mode == 'unsupervise':
-                loss = simcse_unsup_loss(out, device)
-            else:
-                loss = simcse_sup_loss(out, device)
+
+            loss = simcse_sup_loss(out, device)
+
             loss = loss / accumulation_steps
             loss.backward()
             if (step + 1) % accumulation_steps == 0 or (batch_idx + 1 == len(train_loader)):   
+                logger.info(f"epoch: {epoch}, step: {step}, loss: {loss.item()}")
+                train_loss_log.append((step, loss.item()))
                 optimizer.step()
                 optimizer.zero_grad()
             
-            if loss.item() < best_loss:
-                best_loss = loss.item()
-                torch.save(model.state_dict(), os.path.join(save_path, "best_model.pt"))
-                logger.info(f"Best model saved at step {step} with loss {best_loss:.4f}")
+            # if loss.item() < best_loss:
+            #     best_loss = loss.item()
+            #     torch.save(model.state_dict(), os.path.join(save_path, "best_model.pt"))
+            #     logger.info(f"Best model saved at step {step} with loss {best_loss:.4f}")
+            if step % eval_step == 0:
+                eval_loss = bt_eval_loss(model, dev_loader, device)
+                eval_loss_log.append((step, eval_loss))
+                logger.info(f"epoch: {epoch}, step: {step}, eval_loss: {eval_loss:.4f}")
 
-            if step % 100 == 0:
-                logger.info(f"epoch: {epoch}, step: {step}, loss: {loss.item()}")
+                if eval_loss < best_loss:
+                    best_loss = eval_loss
+                    torch.save(model.state_dict(), os.path.join(save_path, "best_model_bt.pt"))
+                    logger.info(f"Best model saved at step {step} with loss {best_loss:.4f}")
+
+
+            if step % eval_step == 0:
+                dev_accuracy = eval_accuracy(model, dev_claim_path, evidence_subset_path, output_pkl_path, tokenizer, device)
+                accuracy_log.append((step, dev_accuracy))
+                logger.info(f"epoch: {epoch}, step: {step}, retrieval_accuracy: {dev_accuracy:.4f}")
+                if dev_accuracy > best_accuracy:
+                    best_accuracy = dev_accuracy
+                    torch.save(model.state_dict(), os.path.join(save_path, "best_model.pt"))
+                    logger.info(f"Best model saved at step {step} with accuracy {best_accuracy:.4f}")
+
+        # dev_accuracy = eval_accuracy(model, dev_claim_path, evidence_subset_path, output_pkl_path, tokenizer, device)
+        # accuracy_log.append((step, dev_accuracy))
+        # logger.info(f"epoch: {epoch}, step: {step}, retrieval_accuracy: {dev_accuracy:.4f}")
 
     logger.info(f"Training completed. Best loss: {best_loss:.4f}")
     torch.save(model.state_dict(), os.path.join(save_path, "final_model.pt"))
-    return 0
+    return train_loss_log, eval_loss_log, accuracy_log
 
-# def AMP_train_sup(model, train_loader, optimizer, device, epochs = 5, train_mode = 'supervise'):
-#     logger.info("AMP start training")
-#     model.train()
-#     accumulation_steps = 4
-#     scaler = GradScaler()
-#     for epoch in range(epochs):
-#         for batch_idx, data in enumerate(tqdm(train_loader)):
-#             step = epoch * len(train_loader) + batch_idx
-#             # [batch, n, seq_len] -> [batch * n, sql_len]
-#             sql_len = data['input_ids'].shape[-1]
-#             input_ids = data['input_ids'].view(-1, sql_len).to(device)
-#             attention_mask = data['attention_mask'].view(-1, sql_len).to(device)
-#             token_type_ids = data['token_type_ids'].view(-1, sql_len).to(device)
 
-#             with autocast():
-#                 out = model(input_ids, attention_mask, token_type_ids)
-#                 if train_mode == 'unsupervise':
-#                     loss = simcse_unsup_loss(out, device)
-#                 else:
-#                     loss = simcse_sup_loss(out, device)
+# import pandas as pd
 
-#             scaler.scale(loss).backward()
-#             step += 1
+# df_train = pd.DataFrame(train_loss_log, columns=['step', 'train_loss'])
+# df_eval  = pd.DataFrame(eval_loss_log, columns=['step', 'eval_loss'])
+# df_acc   = pd.DataFrame(accuracy_log, columns=['step', 'accuracy'])
 
-#             if (step + 1) % accumulation_steps == 0:
-#                 optimizer.zero_grad()
-#                 scaler.step(optimizer)
-#                 scaler.update()            
-#             if step % 100 == 0:
-#                 logger.info(f"epoch: {epoch}, step: {step}, loss: {loss.item()}")
+# log_df = pd.merge(df_train, df_eval, on='step', how='outer')
+# log_df = pd.merge(log_df, df_acc, on='step', how='outer')
+# log_df.sort_values(by='step', inplace=True)
 
-#     return 0
+# log_df.to_csv("logs/training_log.csv", index=False)
+
+
+
+
+
+
+
+
+# dev_claim sample
+# {
+#     "claim-752": {
+#         "claim_text": "[South Australia] has the most expensive electricity in the world.",
+#         "claim_label": "SUPPORTS",
+#         "evidences": [
+#             "evidence-67732",
+#             "evidence-572512"
+#         ]
+#     },
+# }
+
+
+# evidence_subset sample
+# {
+#   "evidence-442946": "At very high concentrations (100 times atmosphe...
+# }
+
+def eval_accuracy(model, dev_claim_path, evidence_subset_path, output_pkl_path, tokenizer, device, top_k = 5):
+    
+    with open(dev_claim_path, "r", encoding="utf-8") as f:
+        dev_claim = json.load(f)
+
+    matched_evidence = 0
+    correct_evidence = 0
+    embed_evidence_pkl(evidence_subset_path, output_pkl_path, model, tokenizer, device, max_length=256, batch_size=512)
+
+    evidence_embeddings_dict = load_evidence_embeddings_from_pickle(output_pkl_path, device)
+    logger.info(f"Load evidence embeddings from {output_pkl_path}")
+    evidence_ids = list(evidence_embeddings_dict.keys())
+    evidence_embeddings = torch.stack([evidence_embeddings_dict[eid]['embedding'] for eid in evidence_ids])  # [num_evidence, 768]
+
+    for claim_id, claim_info in dev_claim.items():
+        claim_text = claim_info["claim_text"]
+        positive_ids = claim_info["evidences"]
+        # Tokenize claim
+
+        inputs = tokenizer(
+            claim_text,
+            max_length=256,
+            truncation=True,
+            padding='max_length',
+            return_tensors='pt'
+        )
+        input_ids = inputs['input_ids'].to(device)
+        attention_mask = inputs['attention_mask'].to(device)
+        token_type_ids = inputs['token_type_ids'].to(device)
+        with torch.no_grad():
+            claim_embedding = model(input_ids, attention_mask, token_type_ids)
+
+        # calculate cosine similarity for claim and all evidence
+        sim_scores = F.cosine_similarity(claim_embedding, evidence_embeddings, dim=1)
+
+        #sort top k evidence
+        topk_probs, topk_indices = torch.topk(sim_scores, top_k)
+        output_evidence_id = [evidence_ids[i] for i in topk_indices]
+
+        # Check if any of the top k evidence IDs are in the positive IDs
+        matched_evidence += len(set(output_evidence_id) & set(positive_ids))
+        correct_evidence += len(positive_ids)
+    
+    return matched_evidence / correct_evidence
+
+
+
+#Bradley-Terry Loss
+def bt_eval_loss(model, dev_loader, device):
+    losses = []
+    model.eval()
+    # model.to(device)  
+
+    with torch.no_grad():
+        for batch_idx, data in enumerate(tqdm(dev_loader)):
+
+            # [batch, n, seq_len] -> [batch * n, sql_len]
+            sql_len = data['input_ids'].shape[-1]
+            input_ids = data['input_ids'].view(-1, sql_len).to(device)
+            attention_mask = data['attention_mask'].view(-1, sql_len).to(device)
+            token_type_ids = data['token_type_ids'].view(-1, sql_len).to(device)
+
+            # Get model output for all (anchor, pos, neg) in batch
+            out = model(input_ids, attention_mask, token_type_ids)  # shape: [B*3, hidden_dim]
+            # Split embeddings into anchor, pos, neg
+            e_a = out[0::3]  # from first one, every 3rd → a1, a2, ...
+            e_p = out[1::3]  # from first one, every 3rd → p1, p2, ...
+            e_n = out[2::3]  # from second one, every 3rd → n1, n2, ...
+            # Compute similarity
+            sim_ap = F.cosine_similarity(e_a, e_p, dim=1)  # [B]
+            sim_an = F.cosine_similarity(e_a, e_n, dim=1)  # [B]
+
+            logits = torch.stack([sim_ap, sim_an], dim=1)  # shape: [B, 2]
+            log_probs = F.log_softmax(logits, dim=1)
+            loss = -log_probs[:, 0]  
+            losses.append(loss.mean().item())
+
+    return sum(losses) / len(losses)
+
+# def bt_eval_loss(model, dataloader, device):
+#     losses = []
+#     model.eval()
+#     with torch.no_grad():
+#         for a, p, n in dataloader:
+#             e_a = model(a)
+#             e_p = model(p)
+#             e_n = model(n)
+
+#             sim_ap = F.cosine_similarity(e_a, e_p)
+#             sim_an = F.cosine_similarity(e_a, e_n)
+
+#             logits = torch.stack([sim_ap, sim_an], dim=1)
+#             log_probs = F.log_softmax(logits, dim=1)
+#             loss = -log_probs[:, 0]  # choose the positive pair
+#             losses.append(loss.mean().item())
+
+#     return sum(losses) / len(losses)
+
+
 
 if __name__ == '__main__':
     batch_size = 64

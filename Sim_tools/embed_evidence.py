@@ -7,7 +7,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
-from model_Sim import SimcseModel, simcse_unsup_loss, simcse_sup_loss
+from model_Sim import SimcseModel, simcse_sup_loss
 from dataset_Sim import TrainDataset, TestDataset
 from transformers import BertModel, BertConfig, BertTokenizer
 import os
@@ -30,7 +30,6 @@ def embed_evidence(evidence_json_path, output_json_path, model, tokenizer, devic
     with open(evidence_json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    # 提取 id 和文本列表
     ids = []
     evidence = []
 
@@ -67,7 +66,7 @@ def embed_evidence(evidence_json_path, output_json_path, model, tokenizer, devic
                 "text": evidence_text,
                 "embedding": embedding
             }
-            print(f"正在处理 evidence_id: {evidence_id}，当前进度: {count}/{len(evidence)}", evidence_text)
+            print(f"Processing evidence_id: {evidence_id}, Progress: {count}/{len(evidence)}", evidence_text)
             count += 1
             
 
@@ -90,7 +89,6 @@ def embed_evidence_pkl(evidence_json_path, output_pkl_path, model, tokenizer, de
     with open(evidence_json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    # 提取 id 和文本列表
     ids = []
     evidence = []
 
@@ -124,19 +122,18 @@ def embed_evidence_pkl(evidence_json_path, output_pkl_path, model, tokenizer, de
         for j in range(len(batch_evidence)):
             evidence_id = batch_ids[j]
             evidence_text = batch_evidence[j]
-            embedding = embeddings[j].cpu()  # 不转 list，保留为 Tensor
+            embedding = embeddings[j].cpu()  # [768]
             results[evidence_id] = {
                 "text": evidence_text,
                 "embedding": embedding
             }
-            print(f"正在处理 evidence_id: {evidence_id}，当前进度: {count}/{len(evidence)}")
+            print(f"Writing evidence_id: {evidence_id}, Progress: {count}/{len(evidence)}")
             count += 1
 
-    # 保存为 pickle 文件
     with open(output_pkl_path, "wb") as f_out:
         pickle.dump(results, f_out)
 
-    print(f"保存完成：共 {len(results)} 条 evidence 保存至 {output_pkl_path}")
+    print(f"Save: total {len(results)} evidence save to {output_pkl_path}")
 #dev_file_path json sample:
 # {
 #     "claim-752": {
@@ -157,9 +154,7 @@ def embed_evidence_pkl(evidence_json_path, output_pkl_path, model, tokenizer, de
 
 
 def load_dev_claims(dev_file_path):
-    """
-    读取 dev 文件，返回一个包含 claim_text、label、evidences 的列表
-    """
+
     claim_x = []
     claim_y = []
     with open(dev_file_path, 'r', encoding='utf-8') as f:
@@ -171,9 +166,7 @@ def load_dev_claims(dev_file_path):
     return claim_x, claim_y
 
 def load_evidence_embeddings(embedding_file_path):
-    """
-    加载 embedding 文件，兼容 list 或 dict 格式，返回 {evidence_id: {...}} 字典
-    """
+
     embedding_list = []
     with open(embedding_file_path, 'r', encoding='utf-8') as f:
         embedding_data = json.load(f)

@@ -59,6 +59,6 @@ class ClaimEvidenceEmbeddingDataset(Dataset):
         row = self.data.iloc[idx]
         claim_emb = self.encode_text(row['claim'])
         evidence_emb = self.encode_text(row['evidence'])
-        label = torch.tensor(row['label'], dtype=torch.float)  # 如果是 BCE loss，保持 float
+        label = torch.tensor(row['label'], dtype=torch.float)  
 
         return claim_emb, evidence_emb, label

@@ -7,7 +7,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
-from model_Sim import SimcseModel, simcse_unsup_loss, simcse_sup_loss
+from model_Sim import SimcseModel, simcse_sup_loss
 from dataset_Sim import TrainDataset, TestDataset
 from transformers import BertModel, BertConfig, BertTokenizer
 import os
@@ -22,34 +22,15 @@ import pandas as pd
 
 
 def match_evidence_by_similarity(claim_embedding, evidence_embeddings_dict, top_k=5, temperature=0.05):
-    """
-    根据 claim 与 evidence embedding 的相似度，返回最相关的 evidence ID 列表。
 
-    参数:
-        claim_embedding: torch.Tensor，形状为 [768]（或其他维度）
-        evidence_embeddings_dict: dict，格式 {'evidence-id': torch.Tensor([768])}
-        top_k: 返回的 evidence 数量
-        temperature: softmax 温度缩放因子
-
-    返回:
-        List[str]：与 claim 最相关的 evidence id（按相似度排序）
-    """
-
-    # 所有 evidence 的 ID 和向量堆叠成矩阵
     evidence_ids = list(evidence_embeddings_dict.keys())
     evidence_tensor = torch.stack([evidence_embeddings_dict[eid]['embedding'] for eid in evidence_ids])  # [num_evidence, 768]
 
-    # 计算余弦相似度
     sim_scores = F.cosine_similarity(claim_embedding.unsqueeze(0), evidence_tensor, dim=1)  # [num_evidence]
 
-    # softmax 转成概率（可选，如果你只想排序，不一定要 softmax）
     sim_probs = F.softmax(sim_scores / temperature, dim=0)  # [num_evidence]
-
-    # 取 top-k
     topk_probs, topk_indices = torch.topk(sim_probs, top_k)
-    print(topk_probs)
-
-    # 返回 evidence id（按相似度高到低排序）
+    # print(topk_probs)
     top_evidence_ids = [evidence_ids[i] for i in topk_indices]
 
     return top_evidence_ids
