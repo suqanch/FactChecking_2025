@@ -46,14 +46,12 @@ def train_classifier(
 
             total_loss += loss.item()
 
-            # 保存最佳模型
             if loss.item() < best_loss:
                 best_loss = loss.item()
                 torch.save(model.state_dict(), best_model_path)
-                print(f"[Best] Epoch {epoch} | Loss: {loss.item():.4f} | 模型已保存到 {best_model_path}")
+                print(f"[Best] Epoch {epoch} | Loss: {loss.item():.4f} | saved to {best_model_path}")
 
         print(f"[Epoch {epoch+1}] Loss: {total_loss:.4f}")
 
-    # 保存最终模型
     torch.save(model.state_dict(), final_model_path)
-    print(f"[Final] 模型已保存到 {final_model_path}")
+    print(f"[Final] saved {final_model_path}")

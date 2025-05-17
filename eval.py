@@ -23,7 +23,6 @@ def main(args):
 
     try:
         f, acc = [], []
-
         #iterate through the groundtruth instances
         for claim_id, claim in sorted(groundtruth.items()):
             if claim_id in predictions and \
@@ -32,6 +31,7 @@ def main(args):
 
                 #check claim level label
                 instance_correct = 0.0
+                print("claim_id =", claim_id)
                 if predictions[claim_id]["claim_label"] == claim["claim_label"]:
                     instance_correct = 1.0
                 

@@ -65,7 +65,7 @@ def load_test_data_supervised(tokenizer, file_path, max_length = 128):
     return feature_list
 
 
-def train_sup(model, train_loader, dev_loader, optimizer, device, tokenizer, epochs = 15, eval_step = 200, 
+def train_sup(model, train_loader, dev_loader, optimizer, device, tokenizer, epochs = 10, eval_step = 400, 
               train_mode = 'supervise', dev_claim_path = 'dev-claims.json', 
               evidence_subset_path = 'evidence_subset_train.json', 
               output_pkl_path = 'evidence_embeddings.pkl'):
@@ -74,6 +74,7 @@ def train_sup(model, train_loader, dev_loader, optimizer, device, tokenizer, epo
     train_loss_log = []
     eval_loss_log  = []
     accuracy_log   = []
+    f1_log = []
 
     model.train()
     accumulation_steps = 2
@@ -83,8 +84,9 @@ def train_sup(model, train_loader, dev_loader, optimizer, device, tokenizer, epo
     os.makedirs(save_path, exist_ok=True)
 
 
-    dev_accuracy = eval_accuracy(model, dev_claim_path, evidence_subset_path, output_pkl_path, tokenizer, device)
+    dev_accuracy, f1_score = eval_accuracy(model, dev_claim_path, evidence_subset_path, output_pkl_path, tokenizer, device)
     logger.info(f"Step 0 retrieval_accuracy: {dev_accuracy:.4f}")
+    logger.info(f"Step 0 f1_score: {f1_score:.4f}")
 
     for epoch in range(epochs):
         for batch_idx, data in enumerate(tqdm(train_loader)):
@@ -111,33 +113,34 @@ def train_sup(model, train_loader, dev_loader, optimizer, device, tokenizer, epo
             #     best_loss = loss.item()
             #     torch.save(model.state_dict(), os.path.join(save_path, "best_model.pt"))
             #     logger.info(f"Best model saved at step {step} with loss {best_loss:.4f}")
+
             if step % eval_step == 0:
                 eval_loss = bt_eval_loss(model, dev_loader, device)
                 eval_loss_log.append((step, eval_loss))
                 logger.info(f"epoch: {epoch}, step: {step}, eval_loss: {eval_loss:.4f}")
-
+                model.train()
                 if eval_loss < best_loss:
                     best_loss = eval_loss
                     torch.save(model.state_dict(), os.path.join(save_path, "best_model_bt.pt"))
                     logger.info(f"Best model saved at step {step} with loss {best_loss:.4f}")
 
-
-            if step % eval_step == 0:
-                dev_accuracy = eval_accuracy(model, dev_claim_path, evidence_subset_path, output_pkl_path, tokenizer, device)
-                accuracy_log.append((step, dev_accuracy))
-                logger.info(f"epoch: {epoch}, step: {step}, retrieval_accuracy: {dev_accuracy:.4f}")
-                if dev_accuracy > best_accuracy:
-                    best_accuracy = dev_accuracy
-                    torch.save(model.state_dict(), os.path.join(save_path, "best_model.pt"))
-                    logger.info(f"Best model saved at step {step} with accuracy {best_accuracy:.4f}")
-
+        dev_accuracy, f1_score = eval_accuracy(model, dev_claim_path, evidence_subset_path, output_pkl_path, tokenizer, device)
+        accuracy_log.append((step, dev_accuracy))
+        f1_log.append((step, f1_score))
+        logger.info(f"epoch: {epoch}, step: {step}, retrieval_accuracy: {dev_accuracy:.4f}")
+        logger.info(f"epoch: {epoch}, step: {step}, f1_score: {f1_score:.4f}")
+        if dev_accuracy > best_accuracy:
+            best_accuracy = dev_accuracy
+            torch.save(model.state_dict(), os.path.join(save_path, "best_model.pt"))
+            logger.info(f"Best model saved at step {step} with accuracy {best_accuracy:.4f}")
+        model.train()
         # dev_accuracy = eval_accuracy(model, dev_claim_path, evidence_subset_path, output_pkl_path, tokenizer, device)
         # accuracy_log.append((step, dev_accuracy))
         # logger.info(f"epoch: {epoch}, step: {step}, retrieval_accuracy: {dev_accuracy:.4f}")
 
     logger.info(f"Training completed. Best loss: {best_loss:.4f}")
     torch.save(model.state_dict(), os.path.join(save_path, "final_model.pt"))
-    return train_loss_log, eval_loss_log, accuracy_log
+    return train_loss_log, eval_loss_log, accuracy_log, f1_log
 
 
 # import pandas as pd
@@ -145,9 +148,11 @@ def train_sup(model, train_loader, dev_loader, optimizer, device, tokenizer, epo
 # df_train = pd.DataFrame(train_loss_log, columns=['step', 'train_loss'])
 # df_eval  = pd.DataFrame(eval_loss_log, columns=['step', 'eval_loss'])
 # df_acc   = pd.DataFrame(accuracy_log, columns=['step', 'accuracy'])
+# df_f1    = pd.DataFrame(f1_log, columns=['step', 'f1_score'])
 
 # log_df = pd.merge(df_train, df_eval, on='step', how='outer')
 # log_df = pd.merge(log_df, df_acc, on='step', how='outer')
+# log_df = pd.merge(log_df, df_f1, on='step', how='outer')
 # log_df.sort_values(by='step', inplace=True)
 
 # log_df.to_csv("logs/training_log.csv", index=False)
@@ -177,13 +182,17 @@ def train_sup(model, train_loader, dev_loader, optimizer, device, tokenizer, epo
 #   "evidence-442946": "At very high concentrations (100 times atmosphe...
 # }
 
-def eval_accuracy(model, dev_claim_path, evidence_subset_path, output_pkl_path, tokenizer, device, top_k = 5):
-    
+def eval_accuracy(model, dev_claim_path, evidence_subset_path, output_pkl_path, tokenizer, device, top_k = 10):
+    model.eval()
     with open(dev_claim_path, "r", encoding="utf-8") as f:
         dev_claim = json.load(f)
 
     matched_evidence = 0
     correct_evidence = 0
+    retrieved_total = 0
+    count_5 = 0
+    total_count = 0
+
     embed_evidence_pkl(evidence_subset_path, output_pkl_path, model, tokenizer, device, max_length=256, batch_size=512)
 
     evidence_embeddings_dict = load_evidence_embeddings_from_pickle(output_pkl_path, device)
@@ -216,12 +225,22 @@ def eval_accuracy(model, dev_claim_path, evidence_subset_path, output_pkl_path, 
         topk_probs, topk_indices = torch.topk(sim_scores, top_k)
         output_evidence_id = [evidence_ids[i] for i in topk_indices]
 
-        # Check if any of the top k evidence IDs are in the positive IDs
-        matched_evidence += len(set(output_evidence_id) & set(positive_ids))
-        correct_evidence += len(positive_ids)
-    
-    return matched_evidence / correct_evidence
+        count = (sim_scores > 0.5).sum().item()
+        count_5 += count
+        total_count += sim_scores.size(0)
+        # print(f"Number of evidence with sim > 0.5: {count} / {sim_scores.size(0)}")
 
+        matched = set(output_evidence_id) & set(positive_ids)
+        matched_evidence += len(matched)        
+        correct_evidence += len(positive_ids)
+        retrieved_total += len(output_evidence_id)
+    
+    recall = matched_evidence / correct_evidence if correct_evidence > 0 else 0.0
+    precision = matched_evidence / retrieved_total if retrieved_total > 0 else 0.0
+    f1 = 2 * precision * recall / (precision + recall + 1e-8)
+    logger.info(f"[Eval Accuracy] Recall: {recall:.4f}, Precision: {precision:.4f}, F1: {f1:.4f}")
+    logger.info(f'[Eval Accuracy] Average number of evidence with sim > 0.5: {count_5 / total_count:.4f}')
+    return recall, f1
 
 
 #Bradley-Terry Loss

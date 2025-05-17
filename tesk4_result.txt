@@ -1,0 +1,6 @@
+dev-claim no preprocessing :0.4156
+
+python eval.py --predictions data/dev-claims-baseline.json --groundtruth data/dev-claims.json --verbose  0.344089
+
+python eval.py --predictions local_data/task4/task4_output_phi_minilm.json --groundtruth data/dev-claims.json --verbose
+task4_input_distilbert_from_dev + preprocessing: 0.3766

@@ -127,7 +127,7 @@ def embed_evidence_pkl(evidence_json_path, output_pkl_path, model, tokenizer, de
                 "text": evidence_text,
                 "embedding": embedding
             }
-            print(f"Writing evidence_id: {evidence_id}, Progress: {count}/{len(evidence)}")
+            # print(f"Writing evidence_id: {evidence_id}, Progress: {count}/{len(evidence)}")
             count += 1
 
     with open(output_pkl_path, "wb") as f_out:
