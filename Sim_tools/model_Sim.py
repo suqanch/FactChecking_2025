@@ -34,13 +34,12 @@ class ClaimEvidenceClassifier(nn.Module):
 
 
 class SimcseModel(nn.Module):
-    """Simcse无监督模型定义"""
 
     def __init__(self, pretrained_model, pooling, dropout=0.3):
         super(SimcseModel, self).__init__()
         # config = SimBertConfig.from_pretrained(pretrained_model)
         config = BertConfig.from_pretrained(pretrained_model)
-        config.attention_probs_dropout_prob = dropout  # 修改config的dropout系数
+        config.attention_probs_dropout_prob = dropout
         config.hidden_dropout_prob = dropout
         self.bert = BertModel.from_pretrained(pretrained_model, config=config)
         # self.bert = SimBertModel.from_pretrained(pretrained_model, config=config)
