@@ -4,3 +4,4 @@ data/dev-claims.json
 *.pt
 local_data/evidence_topic_model
 local_data/evidence-Bertopic
+saved_model

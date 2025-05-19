@@ -6,7 +6,9 @@ https://drive.google.com/drive/folders/1spT1gTUSkm4mP_mTiW0CES2dqKgLPRq_?usp=dri
 ##  Overview
 This project implements a multi-stage pipeline for fact-checking climate-related claims. The system retrieves evidence from a large corpus and classifies claims into four categories: `SUPPORTS`, `REFUTES`, `NOT_ENOUGH_INFO`, or `DISPUTED`. The pipeline combines lexical retrieval, semantic dense encoding, transformer-based re-ranking, and zero-shot classification using compact LLMs.
 
-##  Pipeline Architecture
+##  Pipeline Architecture1
+
+Conducted in: `COMP90042_2025/COMP90042_Project_2025.ipynb` 
 
 1. **Preprocessing**  
    - Stage-specific tokenization, lemmatization, and stopword removal.
@@ -26,19 +28,42 @@ This project implements a multi-stage pipeline for fact-checking climate-related
    - In-context classification using `TinyLlama`, `Qwen1.5`, and `Phi-1.5`.
    - Prompts instruct model to handle `DISPUTED` and `NOT_ENOUGH_INFO` cases explicitly.
 
+
+## Pipeline Architecture2
+
+1. **Perplexity Calculation**  
+   Conducted in: `COMP90042_2025/DataSet Processing_PPL.ipynb`  
+   This step computes the perplexity of each evidence text to assist with filtering.
+
+2. **Two-Stage FAISS Retrieval for Climate-Related Evidence**  
+   Conducted in: `COMP90042_2025/DataSet Processing2_Faiss.ipynb`  
+   This step applies FAISS clustering twice to select climate-related evidence based on semantic similarity and perplexity scores.
+
+3. **SimCSE Model Training and In-Context Classification**  
+   Conducted in: `COMP90042_2025/Model Implementation&Evaluation_Simcse.ipynb`  
+   Using data generated from steps 1 and 2, a SimCSE model is trained. The trained model is then used to retrieve and classify evidence for `dev-claims` through in-context learning.
+
 ##  File Structure
 
 ```
-COMP90042_Project_2025/
-│
-├── COMP90042_Project_2025.ipynb      # Main notebook (code + outputs)
-├── eval.py                           # Provided evaluation script
-├── evidence.json                     # Evidence corpus
-├── train-claims.json                 # Labelled training claims
-├── dev-claims.json                   # Development claims with labels
-├── test-claims-unlabelled.json      # Unlabelled test set for leaderboard
-├── README.md                         # This file
-└── (Optional scripts if added by you)
+COMP90042_2025/
+├── pycache/
+├── data/
+├── FactChecking_2025/
+├── generate_train_dataset/
+├── local_data/
+├── log/
+├── saved_model/
+├── Sim_tools/
+├── .gitignore
+├── COMP90042_Project_2025.ipynb
+├── DataSet Processing_PPL.ipynb
+├── DataSet Processing2_Faiss.ipynb
+├── eval.py
+├── Model Implementation&Evaluation_Simcse.ipynb
+├── Project Group.md
+├── README_COMP90042_Project.md
+├── README.md
 ```
 
 ##  Running the Project
