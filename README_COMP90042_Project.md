@@ -2,8 +2,7 @@
 **Group 24 — Semester 1, 2025**
 
 ## All fin-tuned models can be found at:
-https://drive.google.com/drive/u/0/folders/1spT1gTUSkm4mP_mTiW0CES2dqKgLPRq_
-
+https://drive.google.com/drive/folders/1spT1gTUSkm4mP_mTiW0CES2dqKgLPRq_?usp=drive_link
 ##  Overview
 This project implements a multi-stage pipeline for fact-checking climate-related claims. The system retrieves evidence from a large corpus and classifies claims into four categories: `SUPPORTS`, `REFUTES`, `NOT_ENOUGH_INFO`, or `DISPUTED`. The pipeline combines lexical retrieval, semantic dense encoding, transformer-based re-ranking, and zero-shot classification using compact LLMs.
 
