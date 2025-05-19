@@ -27,7 +27,7 @@ for claim_id, claim_info in train_data.items():
         pos_text = evidence_data[pos_id]
 
         negative_candidates = [eid for eid in all_evidence_ids if eid not in positive_ids]
-        for _ in range(3):
+        for _ in range(2):
             neg_id = random.choice(negative_candidates)
             neg_text = evidence_data[neg_id]
 
